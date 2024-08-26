@@ -1,0 +1,1 @@
+A point of sales application with complete inventory management, expense manager, sales, etc. Manages multiple stores of a company. WHolesale and retail management, credit and wallet sales. Deposit of funds in account. It is made for basically all business, supermarket, pharmacies, stores, etc
