@@ -1,6 +1,5 @@
 <?php
-date_default_timezone_set("Africa/Lagos");
-    
+    date_default_timezone_set("Africa/Lagos");
     // if(isset($_POST['change_prize'])){
         $trans_type = "sales_return";
         $item = htmlspecialchars(stripslashes($_POST['item']));
@@ -18,7 +17,6 @@ date_default_timezone_set("Africa/Lagos");
         include "../classes/update.php";
         include "../classes/inserts.php";
         include "../classes/delete.php";
-        
         
         //get item details
         $get_name = new selects();
@@ -47,6 +45,11 @@ date_default_timezone_set("Africa/Lagos");
         $update_sales = new Update_table();
         $update_sales->update_tripple('sales', 'quantity', $new_qty, 'total_amount', $new_amount, 'cost', $new_cost, 'sales_id', $sales);
 
+        //remove from sales if new quantity is 0
+        if($new_qty == 0){
+            $delete_qty = new deletes();
+            $delete_qty->delete_item('sales', 'sales_id', $sales);
+        }
         //get item current quantity in inventory;
         $get_qty = new selects();
         $qtys = $get_qty->fetch_details_2cond('inventory', 'store', 'item', $store, $item);
@@ -80,29 +83,97 @@ date_default_timezone_set("Africa/Lagos");
                 "quantity" => $quantity,
                 "batch_number" => 0,
                 "expiration_date" => $expiration,
-                "reorder_level" => $reorder
+                "reorder_level" => $reorder,
+                'post_date' => $date
             );
             $add_inventory = new add_data('inventory', $insert_data);
             $add_inventory->create_data();
         }
         //insert into audit trail
-        $inser_trail = new audit_trail($item, $trans_type, $inv_qty, $quantity, $user, $store);
-        $inser_trail->audit_trail();
+        $audit_data = array(
+            'item' => $item,
+            'transaction' => $trans_type,
+            'previous_qty' => $inv_qty,
+            'quantity' => $quantity,
+            'store' => $store,
+            'posted_by' => $user,
+            'post_date' => $date
+
+        );
+        $inser_trail = new add_data('audit_trail', $audit_data);
+        $inser_trail->create_data();
+      /*   $inser_trail = new audit_trail($item, $trans_type, $inv_qty, $quantity, $user, $store);
+        $inser_trail->audit_trail(); */
         //update invoice amount in payment table
         //get total invoice amount from payment table
         $get_amount = new selects();
         $amounts = $get_amount->fetch_details_cond('payments', 'invoice', $invoice);
         foreach($amounts as $amount){
-            $invoice_amount = $amount->amount_paid;
+            // $invoice_amount = $amount->amount_paid;
             $invoice_due = $amount->amount_due;
             $payment_type = $amount->payment_mode;
             $customer = $amount->customer;
         }
-       
+        //fetch amount paid by suming
+        $fetch_paid = new selects();
+        $pays = $fetch_paid->fetch_sum_single('payments', 'amount_paid', 'invoice', $invoice);
+        foreach($pays as $pay){
+            $invoice_amount = $pay->total;
+        }
         $new_inv_amount = $invoice_amount - $removed_amount;
         $new_inv_due = $invoice_due - $removed_amount;
-        $update_payment = new Update_table();
-        $update_payment->update_double('payments', 'amount_paid', $new_inv_amount, 'amount_due', $new_inv_due, 'invoice', $invoice);
+        //check if payment mode is multiple
+        $get_mode = new selects();
+        $modes = $get_mode->fetch_count_cond('payments', 'invoice', $invoice);
+        if($modes > 1){
+            //get invoice dur
+            $results = $get_mode->fetch_sum_single('payments','amount_due', 'invoice', $invoice);
+            foreach($results as $result){
+                $invoice_due = $result->total;
+            }
+            $new_inv_due = $invoice_due - $removed_amount;
+            //update all amount due in the mode
+            $update_payment = new Update_table();
+            $update_payment->update_double('payments', 'amount_paid', 0, 'amount_due', $new_inv_due, 'invoice', $invoice);
+            //get first item on invoice
+            $get_first = new selects();
+            $invs = $get_first->fetch_firstColCond('payments', 'invoice', $invoice);
+            foreach($invs as $inv){
+                $id = $inv->payment_id;
+            }
+            //update the amount paid on the first only
+            $update_id = new Update_table();
+            $update_id->update('payments', 'amount_paid', 'payment_id', $new_inv_amount, $id);
+            //get the sum of all the invoices to ascertain wether to remove or not
+            $get_sum = new selects();
+            $sums = $get_sum->fetch_sum_single('payments', 'amount_paid', 'invoice', $invoice);
+            foreach($sums as $sum){
+                $total_paid = $sum->total;
+            }
+            if($total_paid == 0){
+                //delete from sales
+                $delete_sales = new deletes();
+                $delete_sales->delete_item('sales', 'invoice', $invoice);
+                //delete from payments
+                $delete_payment = new deletes();
+                $delete_payment->delete_item('payments', 'invoice', $invoice);
+            }
+        }else{
+            $update_payment = new Update_table();
+            $update_payment->update_double('payments', 'amount_paid', $new_inv_amount, 'amount_due', $new_inv_due, 'invoice', $invoice);
+            //remove invoice from payments and sales if amount is = 0
+            //get new payment amount for the invoice
+            $get_new_amount = new selects();
+            $new_pay_amount = $get_new_amount->fetch_details_group('payments', 'amount_paid', 'invoice', $invoice);
+            if($new_pay_amount->amount_paid == 0){
+                //delete from sales
+                $delete_sales = new deletes();
+                $delete_sales->delete_item('sales', 'invoice', $invoice);
+                //delete from payments
+                $delete_payment = new deletes();
+                $delete_payment->delete_item('payments', 'invoice', $invoice);
+            }
+        }
         $data = array(
             'item' => $item,
             'quantity' => $quantity,
@@ -131,20 +202,10 @@ date_default_timezone_set("Africa/Lagos");
                     $update_wallet = new Update_table();
                     $update_wallet->update('customers', 'wallet_balance', 'customer_id', $new_balance, $customer);
                 }
-            //remove invoice from payments and sales if amount is = 0
-            //get new payment amount for the invoice
-            $get_new_amount = new selects();
-            $new_pay_amount = $get_new_amount->fetch_details_group('payments', 'amount_paid', 'invoice', $invoice);
-                if($new_pay_amount->amount_paid == 0){
-                    //delete from sales
-                    $delete_sales = new deletes();
-                    $delete_sales->delete_item('sales', 'invoice', $invoice);
-                    //delete from payments
-                    $delete_payment = new deletes();
-                    $delete_payment->delete_item('payments', 'invoice', $invoice);
+            
 
                     
-                }
+                
                 echo "<div class='success'><p>$item_name sales returned successfully! <i class='fas fa-thumbs-up'></i></p></div>";
             }else{
                 echo "<p style='background:red; color:#fff; padding:5px'>Failed to insert sales return <i class='fas fa-thumbs-down'></i></p>";

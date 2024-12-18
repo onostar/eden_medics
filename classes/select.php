@@ -1229,7 +1229,7 @@
         
         // fetch daily sales
         public function fetch_daily_sales($store){
-            $get_daily = $this->connectdb()->prepare("SELECT COUNT(distinct invoice) AS customers, SUM(amount_due) AS revenue, post_date FROM payments WHERE store = :store GROUP BY date(post_date) ORDER BY date(post_date) DESC");
+            $get_daily = $this->connectdb()->prepare("SELECT COUNT(distinct invoice) AS customers, SUM(amount_paid) AS revenue, post_date FROM payments WHERE store = :store GROUP BY date(post_date) ORDER BY date(post_date) DESC");
             $get_daily->bindValue('store', $store);
             $get_daily->execute();
             if($get_daily->rowCount() > 0){
@@ -1253,6 +1253,18 @@
             }else{
                 $rows = "No records found";
                 return $rows;
+            }
+        }
+         //fetch first column from any table with a specific condition
+         public function fetch_firstColCond($table, $column, $value){
+            $get_user = $this->connectdb()->prepare("SELECT * FROM $table WHERE $column = :$column ORDER BY $column LIMIT 1");
+            $get_user->bindValue("$column", $value);
+            $get_user->execute();
+            if($get_user->rowCount() > 0){
+                $rows = $get_user->fetchAll();
+                return $rows;
+            }else{
+                $rows = "<p class='no_result'>No records found</p>";
             }
         }
         //fetch monthly sales
